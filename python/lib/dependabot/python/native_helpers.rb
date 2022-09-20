@@ -12,7 +12,7 @@ module Dependabot
       end
 
       def self.python_helpers_dir
-        File.join(native_helpers_root, "python")
+        File.join(native_helpers_root, "python/helpers")
       end
 
       def self.native_helpers_root

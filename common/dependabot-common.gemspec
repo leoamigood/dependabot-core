@@ -32,7 +32,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "gitlab", "4.19.0"
   spec.add_dependency "nokogiri", "~> 1.8"
   spec.add_dependency "octokit", ">= 4.6", "< 7.0"
-  spec.add_dependency "parser", ">= 2.5", "< 4.0"
+  spec.add_dependency "parser", ">= 3.0", "< 4.0"
   spec.add_dependency "toml-rb", ">= 1.1.2", "< 3.0"
 
   spec.add_development_dependency "debug", ">= 1.0.0"
