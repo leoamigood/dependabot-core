@@ -29,6 +29,7 @@ jobs:
           - hex
           - maven
           - npm
+          - npm-remove-transitive
           - nuget
           - pip
           - pip-compile
@@ -111,6 +112,12 @@ jobs:
             - 'common/**'
             - 'updater/**'
             - 'npm_and_yarn/**'
+          'npm-remove-transitive':
+            - Dockerfile
+            - Dockerfile.updater
+            - 'common/**'
+            - 'updater/**'
+            - 'npm_and_yarn/**'
           nuget:
             - Dockerfile
             - Dockerfile.updater
@@ -163,7 +170,7 @@ jobs:
     - name: Download CLI and test
       if: steps.changes.outputs[matrix.suite] == 'true'
       run: |
-        gh release download --repo dependabot/cli-releases -p "*linux-amd64.tar.gz"
+        gh release download --repo dependabot/cli -p "*linux-amd64.tar.gz"
         tar xzvf *.tar.gz >/dev/null 2>&1
         ./dependabot --version
         URL=https://api.github.com/repos/dependabot/smoke-tests/contents/tests/smoke-${{ matrix.suite }}.yaml

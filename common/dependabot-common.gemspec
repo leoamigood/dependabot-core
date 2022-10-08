@@ -18,8 +18,8 @@ Gem::Specification.new do |spec|
   spec.require_path = "lib"
   spec.files        = []
 
-  spec.required_ruby_version = ">= 2.7.0"
-  spec.required_rubygems_version = ">= 2.7.3"
+  spec.required_ruby_version = ">= 3.1.0"
+  spec.required_rubygems_version = ">= 3.3.22"
 
   spec.add_dependency "activesupport", ">= 6.0.0"
   spec.add_dependency "aws-sdk-codecommit", "~> 1.28"
@@ -35,17 +35,14 @@ Gem::Specification.new do |spec|
   spec.add_dependency "parser", ">= 3.0", "< 4.0"
   spec.add_dependency "toml-rb", ">= 1.1.2", "< 3.0"
 
-  spec.add_development_dependency "debase", "0.2.3"
-  spec.add_development_dependency "debase-ruby_core_source", "0.10.17"
   spec.add_development_dependency "debug", ">= 1.0.0"
   spec.add_development_dependency "gpgme", "~> 2.0"
-  spec.add_development_dependency "parallel_tests", "~> 3.12.0"
+  spec.add_development_dependency "parallel_tests", "~> 3.13.0"
   spec.add_development_dependency "rake", "~> 13"
   spec.add_development_dependency "rspec", "~> 3.8"
   spec.add_development_dependency "rspec-its", "~> 1.2"
   spec.add_development_dependency "rubocop", "~> 1.36.0"
   spec.add_development_dependency "rubocop-performance", "~> 1.15.0"
-  spec.add_development_dependency "ruby-debug-ide", "~> 0.7.3"
   spec.add_development_dependency "simplecov", "~> 0.21.0"
   spec.add_development_dependency "simplecov-console", "~> 0.9.1"
   spec.add_development_dependency "stackprof", "~> 0.2.16"

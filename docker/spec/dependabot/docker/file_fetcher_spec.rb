@@ -18,11 +18,9 @@ RSpec.describe Dependabot::Docker::FileFetcher do
     described_class.new(
       source: source,
       credentials: credentials,
-      repo_contents_path: nil,
-      options: options
+      repo_contents_path: nil
     )
   end
-  let(:options) { {} }
   let(:directory) { "/" }
   let(:github_url) { "https://api.github.com/" }
   let(:url) { github_url + "repos/gocardless/bump/contents/" }
@@ -184,7 +182,9 @@ RSpec.describe Dependabot::Docker::FileFetcher do
     end
 
     let(:kubernetes_fixture) { fixture("github", "contents_kubernetes.json") }
-    let(:options) { { kubernetes_updates: true } }
+    before do
+      Dependabot::Experiments.register(:kubernetes_updates, true)
+    end
 
     it "fetches the pod.yaml" do
       expect(file_fetcher_instance.files.count).to eq(1)
@@ -211,7 +211,9 @@ RSpec.describe Dependabot::Docker::FileFetcher do
     end
 
     context "with kubernetes not enabled" do
-      let(:options) { { kubernetes_updates: false } }
+      before do
+        Dependabot::Experiments.register(:kubernetes_updates, false)
+      end
 
       it "raises a helpful error" do
         expect { file_fetcher_instance.files }.
@@ -247,7 +249,9 @@ RSpec.describe Dependabot::Docker::FileFetcher do
 
     let(:kubernetes_fixture) { fixture("github", "contents_kubernetes.json") }
     let(:kubernetes_2_fixture) { fixture("github", "contents_kubernetes.json") }
-    let(:options) { { kubernetes_updates: true } }
+    before do
+      Dependabot::Experiments.register(:kubernetes_updates, true)
+    end
 
     it "fetches both YAMLs" do
       expect(file_fetcher_instance.files.count).to eq(2)
@@ -262,6 +266,59 @@ RSpec.describe Dependabot::Docker::FileFetcher do
         expect(file_fetcher_instance.files.count).to eq(1)
         expect(file_fetcher_instance.files.map(&:name)).
           to match_array(%w(pod.yaml))
+      end
+    end
+
+    context "with a Helm values file" do
+      before do
+        stub_request(:get, url + "?ref=sha").
+          with(headers: { "Authorization" => "token token" }).
+          to_return(
+            status: 200,
+            body: fixture("github", "contents_helm_repo.json"),
+            headers: { "content-type" => "application/json" }
+          )
+
+        stub_request(:get, File.join(url, "values.yaml?ref=sha")).
+          with(headers: { "Authorization" => "token token" }).
+          to_return(
+            status: 200,
+            body: values_fixture,
+            headers: { "content-type" => "application/json" }
+          )
+
+        stub_request(:get, File.join(url, "other-values.yaml?ref=sha")).
+          with(headers: { "Authorization" => "token token" }).
+          to_return(
+            status: 200,
+            body: values_fixture,
+            headers: { "content-type" => "application/json" }
+          )
+
+        stub_request(:get, File.join(url, "values_other.yaml?ref=sha")).
+          with(headers: { "Authorization" => "token token" }).
+          to_return(
+            status: 200,
+            body: values_fixture,
+            headers: { "content-type" => "application/json" }
+          )
+
+        stub_request(:get, File.join(url, "values2.yaml?ref=sha")).
+          with(headers: { "Authorization" => "token token" }).
+          to_return(
+            status: 200,
+            body: values_fixture,
+            headers: { "content-type" => "application/json" }
+          )
+      end
+
+      let(:values_fixture) { fixture("github", "contents_values_yaml.json") }
+      let(:options) { { kubernetes_updates: true } }
+
+      it "fetches the values.yaml" do
+        expect(file_fetcher_instance.files.count).to eq(4)
+        expect(file_fetcher_instance.files.map(&:name)).
+          to match_array(["other-values.yaml", "values.yaml", "values2.yaml", "values_other.yaml"])
       end
     end
   end

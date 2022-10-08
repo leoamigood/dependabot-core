@@ -4,6 +4,7 @@ require "dependabot/git_commit_checker"
 require "dependabot/update_checkers"
 require "dependabot/update_checkers/base"
 require "dependabot/shared_helpers"
+require "set"
 
 module Dependabot
   module NpmAndYarn
@@ -15,6 +16,20 @@ module Dependabot
       require_relative "update_checker/subdependency_version_resolver"
       require_relative "update_checker/conflicting_dependency_resolver"
       require_relative "update_checker/vulnerability_auditor"
+
+      def up_to_date?
+        return false if security_update? &&
+                        dependency.version &&
+                        version_class.correct?(dependency.version) &&
+                        vulnerable_versions.any? &&
+                        !vulnerable_versions.include?(version_class.new(dependency.version))
+
+        super
+      end
+
+      def vulnerable?
+        super || vulnerable_versions.any?
+      end
 
       def latest_version
         @latest_version ||=
@@ -46,8 +61,8 @@ module Dependabot
         raise "Dependency not vulnerable!" unless vulnerable?
         # NOTE: we currently don't resolve transitive/sub-dependencies as
         # npm/yarn don't provide any control over updating to a specific
-        # sub-dependency
-        return latest_resolvable_version unless dependency.top_level?
+        # sub-dependency version
+        return latest_resolvable_transitive_security_fix_version_with_no_unlock unless dependency.top_level?
 
         # TODO: Might want to check resolvability here?
         lowest_security_fix_version
@@ -125,24 +140,30 @@ module Dependabot
           )
       end
 
+      def vulnerable_versions
+        @vulnerable_versions ||=
+          begin
+            all_versions = dependency.all_versions.
+                           filter_map { |v| version_class.new(v) if version_class.correct?(v) }
+
+            all_versions.select do |v|
+              security_advisories.any? { |advisory| advisory.vulnerable?(v) }
+            end
+          end
+      end
+
       def latest_version_resolvable_with_full_unlock?
         return false unless latest_version
 
         return version_resolver.latest_version_resolvable_with_full_unlock? if dependency.top_level?
 
-        return false unless transitive_security_updates_enabled? && security_advisories.any?
+        return false unless security_advisories.any?
 
         vulnerability_audit["fix_available"]
       end
 
-      def transitive_security_updates_enabled?
-        options.key?(:npm_transitive_security_updates)
-      end
-
       def updated_dependencies_after_full_unlock
-        if !dependency.top_level? && transitive_security_updates_enabled? && security_advisories.any?
-          return conflicting_updated_dependencies
-        end
+        return conflicting_updated_dependencies if !dependency.top_level? && security_advisories.any?
 
         version_resolver.dependency_updates_from_full_unlock.
           map { |update_details| build_updated_dependency(update_details) }
@@ -208,7 +229,7 @@ module Dependabot
           version: version,
           requirements: RequirementsUpdater.new(
             requirements: original_dep.requirements,
-            updated_source: original_dep == dependency ? updated_source : nil,
+            updated_source: original_dep == dependency ? updated_source : original_source(original_dep),
             latest_resolvable_version: version,
             update_strategy: requirements_update_strategy
           ).updated_requirements,
@@ -217,6 +238,16 @@ module Dependabot
           package_manager: original_dep.package_manager,
           removed: removed
         )
+      end
+
+      def latest_resolvable_transitive_security_fix_version_with_no_unlock
+        fix_possible = Dependabot::UpdateCheckers::VersionFilters.filter_vulnerable_versions(
+          [latest_resolvable_version].compact,
+          security_advisories
+        ).any?
+        return nil unless fix_possible
+
+        latest_resolvable_version
       end
 
       def latest_resolvable_version_with_no_unlock_for_git_dependency
@@ -371,12 +402,24 @@ module Dependabot
         return true if dependency_files.any? { |f| f.name == "lerna.json" }
 
         @library =
-          LibraryDetector.new(package_json_file: package_json).library?
+          LibraryDetector.new(
+            package_json_file: package_json,
+            credentials: credentials,
+            dependency_files: dependency_files
+          ).library?
+      end
+
+      def security_update?
+        security_advisories.any?
       end
 
       def dependency_source_details
+        original_source(dependency)
+      end
+
+      def original_source(updated_dependency)
         sources =
-          dependency.requirements.map { |r| r.fetch(:source) }.uniq.compact.
+          updated_dependency.requirements.map { |r| r.fetch(:source) }.uniq.compact.
           sort_by { |source| RegistryFinder.central_registry?(source[:url]) ? 1 : 0 }
 
         sources.first

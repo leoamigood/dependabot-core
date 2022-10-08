@@ -224,6 +224,10 @@ option_parse = OptionParser.new do |opts|
         [o.strip.downcase.to_sym, true]
       end
     end
+
+    $options[:updater_options].each do |name, val|
+      Dependabot::Experiments.register(name, val)
+    end
   end
 
   opts.on("--security-updates-only",
@@ -458,6 +462,17 @@ def handle_dependabot_error(error:, dependency:)
        "#{error_details.fetch(:"error-detail")}"
 end
 # rubocop:enable Metrics/MethodLength
+
+def log_conflicting_dependencies(conflicting_dependencies)
+  return unless conflicting_dependencies.any?
+
+  puts " => The update is not possible because of the following conflicting " \
+       "dependencies:"
+
+  conflicting_dependencies.each do |conflicting_dep|
+    puts "   #{conflicting_dep['explanation']}"
+  end
+end
 
 StackProf.start(raw: true) if $options[:profile]
 
@@ -711,16 +726,7 @@ dependencies.each do |dep|
       puts "    (no update possible 🙅‍♀️)"
     end
 
-    conflicting_dependencies = checker.conflicting_dependencies
-    if conflicting_dependencies.any?
-      puts " => The update is not possible because of the following conflicting " \
-           "dependencies:"
-
-      conflicting_dependencies.each do |conflicting_dep|
-        puts "   #{conflicting_dep['explanation']}"
-      end
-    end
-
+    log_conflicting_dependencies(checker.conflicting_dependencies)
     next
   end
 
@@ -733,23 +739,24 @@ dependencies.each do |dep|
     next
   end
 
+  if $options[:security_updates_only] &&
+     updated_deps.none? { |d| security_fix?(d) }
+    puts "    (updated version is still vulnerable 🚨)"
+    log_conflicting_dependencies(checker.conflicting_dependencies)
+    next
+  end
+
   # Removal is only supported for transitive dependencies which are removed as a
   # side effect of the parent update
   deps_to_update = updated_deps.reject(&:removed?)
   updater = file_updater_for(deps_to_update)
   updated_files = updater.updated_dependency_files
 
-  # Currently unused but used to create pull requests (from the updater)
-  updated_deps.reject do |d|
+  updated_deps = updated_deps.reject do |d|
     next false if d.name == checker.dependency.name
-    next true if d.requirements == d.previous_requirements
+    next true if d.top_level? && d.requirements == d.previous_requirements
 
     d.version == d.previous_version
-  end
-
-  if $options[:security_updates_only] &&
-     updated_deps.none? { |d| security_fix?(d) }
-    puts "    (updated version is still vulnerable 🚨)"
   end
 
   if $options[:write]

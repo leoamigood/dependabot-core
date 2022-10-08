@@ -4,10 +4,12 @@ require "uri"
 
 require "dependabot/npm_and_yarn/file_updater"
 require "dependabot/npm_and_yarn/file_parser"
+require "dependabot/npm_and_yarn/helpers"
 require "dependabot/npm_and_yarn/update_checker/registry_finder"
 require "dependabot/npm_and_yarn/native_helpers"
 require "dependabot/shared_helpers"
 require "dependabot/errors"
+require "dependabot/experiments"
 
 # rubocop:disable Metrics/ClassLength
 module Dependabot
@@ -17,9 +19,10 @@ module Dependabot
         require_relative "npmrc_builder"
         require_relative "package_json_updater"
 
-        def initialize(dependencies:, dependency_files:, credentials:)
+        def initialize(dependencies:, dependency_files:, repo_contents_path:, credentials:)
           @dependencies = dependencies
           @dependency_files = dependency_files
+          @repo_contents_path = repo_contents_path
           @credentials = credentials
         end
 
@@ -35,7 +38,7 @@ module Dependabot
 
         private
 
-        attr_reader :dependencies, :dependency_files, :credentials
+        attr_reader :dependencies, :dependency_files, :repo_contents_path, :credentials
 
         UNREACHABLE_GIT = /ls-remote --tags --heads (?<url>.*)/.freeze
         TIMEOUT_FETCHING_PACKAGE =
@@ -51,13 +54,14 @@ module Dependabot
         end
 
         def updated_yarn_lock(yarn_lock)
-          SharedHelpers.in_a_temporary_directory do
+          base_dir = dependency_files.first.directory
+          SharedHelpers.in_a_temporary_repo_directory(base_dir, repo_contents_path) do
             write_temporary_dependency_files
             lockfile_name = Pathname.new(yarn_lock.name).basename.to_s
             path = Pathname.new(yarn_lock.name).dirname.to_s
             updated_files = run_current_yarn_update(
               path: path,
-              lockfile_name: lockfile_name
+              yarn_lock: yarn_lock
             )
             updated_files.fetch(lockfile_name)
           end
@@ -65,7 +69,7 @@ module Dependabot
           handle_yarn_lock_updater_error(e, yarn_lock)
         end
 
-        def run_current_yarn_update(path:, lockfile_name:)
+        def run_current_yarn_update(path:, yarn_lock:)
           top_level_dependency_updates = top_level_dependencies.map do |d|
             {
               name: d.name,
@@ -76,12 +80,12 @@ module Dependabot
 
           run_yarn_updater(
             path: path,
-            lockfile_name: lockfile_name,
+            yarn_lock: yarn_lock,
             top_level_dependency_updates: top_level_dependency_updates
           )
         end
 
-        def run_previous_yarn_update(path:, lockfile_name:)
+        def run_previous_yarn_update(path:, yarn_lock:)
           previous_top_level_dependencies = top_level_dependencies.map do |d|
             {
               name: d.name,
@@ -94,22 +98,29 @@ module Dependabot
 
           run_yarn_updater(
             path: path,
-            lockfile_name: lockfile_name,
+            yarn_lock: yarn_lock,
             top_level_dependency_updates: previous_top_level_dependencies
           )
         end
 
         # rubocop:disable Metrics/PerceivedComplexity
-        def run_yarn_updater(path:, lockfile_name:,
-                             top_level_dependency_updates:)
+        def run_yarn_updater(path:, yarn_lock:, top_level_dependency_updates:)
           SharedHelpers.with_git_configured(credentials: credentials) do
             Dir.chdir(path) do
               if top_level_dependency_updates.any?
-                run_yarn_top_level_updater(
-                  top_level_dependency_updates: top_level_dependency_updates
-                )
+                if yarn_berry?(yarn_lock)
+                  run_yarn_berry_top_level_updater(top_level_dependency_updates: top_level_dependency_updates,
+                                                   yarn_lock: yarn_lock)
+                else
+
+                  run_yarn_top_level_updater(
+                    top_level_dependency_updates: top_level_dependency_updates
+                  )
+                end
+              elsif yarn_berry?(yarn_lock)
+                run_yarn_berry_subdependency_updater(yarn_lock: yarn_lock)
               else
-                run_yarn_subdependency_updater(lockfile_name: lockfile_name)
+                run_yarn_subdependency_updater(yarn_lock: yarn_lock)
               end
             end
           end
@@ -133,6 +144,49 @@ module Dependabot
 
         # rubocop:enable Metrics/PerceivedComplexity
 
+        def yarn_berry?(yarn_lock)
+          return false unless Experiments.enabled?(:yarn_berry)
+
+          yaml = YAML.safe_load(yarn_lock.content)
+          yaml.key?("__metadata")
+        rescue StandardError
+          false
+        end
+
+        def run_yarn_berry_top_level_updater(top_level_dependency_updates:, yarn_lock:)
+          # If the requirements have changed, it means we've updated the
+          # package.json file(s), and we can just run yarn install to get the
+          # lockfile in the right state. Otherwise we'll need to manually update
+          # the lockfile.
+          command = if top_level_dependency_updates.all? { |dep| requirements_changed?(dep[:name]) }
+                      "yarn install --mode=update-lockfile"
+                    else
+                      updates = top_level_dependency_updates.collect do |dep|
+                        dep[:requirements].map { |req| "#{dep[:name]}@#{req[:requirement]}" }.join(" ")
+                      end
+                      "yarn up #{updates.join(' ')} --mode=update-lockfile"
+                    end
+          Helpers.run_yarn_commands(command)
+          { yarn_lock.name => File.read(yarn_lock.name) }
+        end
+
+        def requirements_changed?(dependency_name)
+          dep = top_level_dependencies.first { |d| d.name == dependency_name }
+          dep.requirements != dep.previous_requirements
+        end
+
+        def run_yarn_berry_subdependency_updater(yarn_lock:)
+          dep = sub_dependencies.first
+          update = "#{dep.name}@#{dep.version}"
+
+          Helpers.run_yarn_commands(
+            "yarn add #{update} --mode=update-lockfile",
+            "yarn dedupe #{dep.name} --mode=update-lockfile",
+            "yarn remove #{dep.name} --mode=update-lockfile"
+          )
+          { yarn_lock.name => File.read(yarn_lock.name) }
+        end
+
         def run_yarn_top_level_updater(top_level_dependency_updates:)
           SharedHelpers.run_helper_subprocess(
             command: NativeHelpers.helper_path,
@@ -144,7 +198,8 @@ module Dependabot
           )
         end
 
-        def run_yarn_subdependency_updater(lockfile_name:)
+        def run_yarn_subdependency_updater(yarn_lock:)
+          lockfile_name = Pathname.new(yarn_lock.name).basename.to_s
           SharedHelpers.run_helper_subprocess(
             command: NativeHelpers.helper_path,
             function: "yarn:updateSubdependency",
@@ -259,12 +314,11 @@ module Dependabot
 
           @resolvable_before_update[yarn_lock.name] =
             begin
-              SharedHelpers.in_a_temporary_directory do
+              base_dir = dependency_files.first.directory
+              SharedHelpers.in_a_temporary_repo_directory(base_dir, repo_contents_path) do
                 write_temporary_dependency_files(update_package_json: false)
-                lockfile_name = Pathname.new(yarn_lock.name).basename.to_s
                 path = Pathname.new(yarn_lock.name).dirname.to_s
-                run_previous_yarn_update(path: path,
-                                         lockfile_name: lockfile_name)
+                run_previous_yarn_update(path: path, yarn_lock: yarn_lock)
               end
 
               true

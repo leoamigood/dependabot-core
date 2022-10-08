@@ -68,13 +68,13 @@ RUN if ! getent group "$USER_GID"; then groupadd --gid "$USER_GID" dependabot ; 
 
 ### RUBY
 
-ARG RUBY_VERSION=2.7.6
+ARG RUBY_VERSION=3.1.2
 ARG RUBY_INSTALL_VERSION=0.8.3
 
-ARG RUBYGEMS_SYSTEM_VERSION=3.2.20
+ARG RUBYGEMS_SYSTEM_VERSION=3.3.22
 
 ARG BUNDLER_V1_VERSION=1.17.3
-ARG BUNDLER_V2_VERSION=2.3.14
+ARG BUNDLER_V2_VERSION=2.3.22
 ENV BUNDLE_SILENCE_ROOT_WARNING=1
 # Allow gem installs as the dependabot user
 ENV BUNDLE_PATH=".bundle" \
@@ -102,10 +102,10 @@ ENV PYENV_ROOT=/usr/local/.pyenv \
   PATH="/usr/local/.pyenv/bin:$PATH"
 RUN mkdir -p "$PYENV_ROOT" && chown dependabot:dependabot "$PYENV_ROOT"
 USER dependabot
-RUN git -c advice.detachedHead=false clone https://github.com/pyenv/pyenv.git --branch v2.3.2 --single-branch --depth=1 /usr/local/.pyenv \
+RUN git -c advice.detachedHead=false clone https://github.com/pyenv/pyenv.git --branch v2.3.4 --single-branch --depth=1 /usr/local/.pyenv \
   # This is the version of CPython that gets installed
-  && pyenv install 3.10.5 \
-  && pyenv global 3.10.5 \
+  && pyenv install 3.10.6 \
+  && pyenv global 3.10.6 \
   && rm -Rf /tmp/python-build*
 USER root
 
@@ -116,9 +116,12 @@ USER root
 RUN curl -sL https://deb.nodesource.com/setup_16.x | bash - \
   && apt-get install -y --no-install-recommends nodejs \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install -g npm@8.18.0 \
+  && npm install -g npm@8.19.2 \
   && rm -rf ~/.npm
 
+# Install yarn berry and set it to a stable version
+RUN corepack enable \
+  && corepack prepare yarn@3.2.3 --activate
 
 ### ELM
 
@@ -228,15 +231,15 @@ ENV RUSTUP_HOME=/opt/rust \
   PATH="${PATH}:/opt/rust/bin"
 RUN mkdir -p "$RUSTUP_HOME" && chown dependabot:dependabot "$RUSTUP_HOME"
 USER dependabot
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain 1.61.0 --profile minimal
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain 1.64.0 --profile minimal
 
 
 ### Terraform
 
 USER root
-ARG TERRAFORM_VERSION=1.2.9
-ARG TERRAFORM_AMD64_CHECKSUM=0e0fc38641addac17103122e1953a9afad764a90e74daf4ff8ceeba4e362f2fb
-ARG TERRAFORM_ARM64_CHECKSUM=6da7bf01f5a72e61255c2d80eddeba51998e2bb1f50a6d81b0d3b71e70e18531
+ARG TERRAFORM_VERSION=1.3.0
+ARG TERRAFORM_AMD64_CHECKSUM=380ca822883176af928c80e5771d1c0ac9d69b13c6d746e6202482aedde7d457
+ARG TERRAFORM_ARM64_CHECKSUM=0a15de6f934cf2217e5055412e7600d342b4f7dcc133564690776fece6213a9a
 RUN cd /tmp \
   && curl -o terraform-${TARGETARCH}.tar.gz https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${TARGETARCH}.zip \
   && printf "$TERRAFORM_AMD64_CHECKSUM terraform-amd64.tar.gz\n$TERRAFORM_ARM64_CHECKSUM terraform-arm64.tar.gz\n" | sha256sum -c --ignore-missing - \
@@ -287,6 +290,9 @@ RUN bash /opt/pub/helpers/build
 
 COPY --chown=dependabot:dependabot npm_and_yarn/helpers /opt/npm_and_yarn/helpers
 RUN bash /opt/npm_and_yarn/helpers/build
+# Our native helpers pull in yarn 1, so we need to reset the version globally to
+# 3.2.3.
+RUN corepack prepare yarn@3.2.3 --activate
 
 COPY --chown=dependabot:dependabot python/helpers /opt/python/helpers
 RUN bash /opt/python/helpers/build
