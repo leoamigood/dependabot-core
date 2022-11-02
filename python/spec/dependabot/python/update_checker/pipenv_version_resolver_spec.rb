@@ -188,7 +188,7 @@ RSpec.describe Dependabot::Python::UpdateChecker::PipenvVersionResolver do
         let(:pyproject) do
           Dependabot::DependencyFile.new(
             name: "pyproject.toml",
-            content: fixture("pyproject_files", "pyproject.toml")
+            content: fixture("pyproject_files", "basic_poetry_dependencies.toml")
           )
         end
 
@@ -218,7 +218,7 @@ RSpec.describe Dependabot::Python::UpdateChecker::PipenvVersionResolver do
                 to start_with("Dependabot detected the following Python")
               expect(error.message).to include("3.4.*")
               expect(error.message).
-                to include("supported in Dependabot: 3.10.6, 3.10.5, 3.10.4")
+                to include("supported in Dependabot: 3.10.7, 3.10.6, 3.10.5")
             end
         end
       end

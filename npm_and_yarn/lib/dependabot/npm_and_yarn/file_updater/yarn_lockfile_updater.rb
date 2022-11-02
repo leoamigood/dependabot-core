@@ -40,10 +40,9 @@ module Dependabot
 
         attr_reader :dependencies, :dependency_files, :repo_contents_path, :credentials
 
-        UNREACHABLE_GIT = /ls-remote --tags --heads (?<url>.*)/.freeze
-        TIMEOUT_FETCHING_PACKAGE =
-          %r{(?<url>.+)/(?<package>[^/]+): ETIMEDOUT}.freeze
-        INVALID_PACKAGE = /Can't add "(?<package_req>.*)": invalid/.freeze
+        UNREACHABLE_GIT = /ls-remote --tags --heads (?<url>.*)/
+        TIMEOUT_FETCHING_PACKAGE = %r{(?<url>.+)/(?<package>[^/]+): ETIMEDOUT}
+        INVALID_PACKAGE = /Can't add "(?<package_req>.*)": invalid/
 
         def top_level_dependencies
           dependencies.select(&:top_level?)
@@ -158,13 +157,14 @@ module Dependabot
           # package.json file(s), and we can just run yarn install to get the
           # lockfile in the right state. Otherwise we'll need to manually update
           # the lockfile.
+
           command = if top_level_dependency_updates.all? { |dep| requirements_changed?(dep[:name]) }
-                      "yarn install --mode=update-lockfile"
+                      "yarn install"
                     else
                       updates = top_level_dependency_updates.collect do |dep|
                         dep[:requirements].map { |req| "#{dep[:name]}@#{req[:requirement]}" }.join(" ")
                       end
-                      "yarn up #{updates.join(' ')} --mode=update-lockfile"
+                      "yarn up #{updates.join(' ')}"
                     end
           Helpers.run_yarn_commands(command)
           { yarn_lock.name => File.read(yarn_lock.name) }
@@ -180,9 +180,9 @@ module Dependabot
           update = "#{dep.name}@#{dep.version}"
 
           Helpers.run_yarn_commands(
-            "yarn add #{update} --mode=update-lockfile",
-            "yarn dedupe #{dep.name} --mode=update-lockfile",
-            "yarn remove #{dep.name} --mode=update-lockfile"
+            "yarn add #{update}",
+            "yarn dedupe #{dep.name}",
+            "yarn remove #{dep.name}"
           )
           { yarn_lock.name => File.read(yarn_lock.name) }
         end
@@ -474,7 +474,8 @@ module Dependabot
             dependency: missing_dep,
             credentials: credentials,
             npmrc_file: npmrc_file,
-            yarnrc_file: yarnrc_file
+            yarnrc_file: yarnrc_file,
+            yarnrc_yml_file: yarnrc_yml_file
           ).registry
 
           return if UpdateChecker::RegistryFinder.central_registry?(reg) && !package_name.start_with?("@")
@@ -577,6 +578,10 @@ module Dependabot
 
         def npmrc_file
           dependency_files.find { |f| f.name == ".npmrc" }
+        end
+
+        def yarnrc_yml_file
+          dependency_files.find { |f| f.name.end_with?(".yarnrc.yml") }
         end
       end
     end

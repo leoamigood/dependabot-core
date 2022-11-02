@@ -19,7 +19,7 @@ module Dependabot
         |
         [0-9]+\.[0-9]+(?:\.[a-z0-9\-]+)*
       )$
-    /ix.freeze
+    /ix
 
     def initialize(dependency:, credentials:,
                    ignored_versions: [], raise_on_ignored: false,
@@ -49,8 +49,14 @@ module Dependabot
       return true if branch
       return true if dependency.version&.start_with?(ref)
 
-      # Check the specified `ref` isn't actually a branch
-      !local_upload_pack.match?(%r{ refs/heads/#{ref}$})
+      # If the specified `ref` is actually a tag, we're pinned
+      return true if local_upload_pack.match?(%r{ refs/tags/#{ref}$})
+
+      # If the specified `ref` is actually a branch, we're NOT pinned
+      return false if local_upload_pack.match?(%r{ refs/heads/#{ref}$})
+
+      # Otherwise, assume we're pinned
+      true
     end
 
     def pinned_ref_looks_like_version?
@@ -61,6 +67,10 @@ module Dependabot
 
     def pinned_ref_looks_like_commit_sha?
       ref = dependency_source_details.fetch(:ref)
+      ref_looks_like_commit_sha?(ref)
+    end
+
+    def ref_looks_like_commit_sha?(ref)
       return false unless ref&.match?(/^[0-9a-f]{6,40}$/)
 
       return false unless pinned?
